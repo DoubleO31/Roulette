@@ -48,6 +48,27 @@ function getSeed(nStr: string): number {
   return parseInt(nStr);
 }
 
+// Helper to get Mix Bet label and description from seed
+function getMixBetFromSeed(seed: number): { name: string; description: string } {
+  const isDozen = seed % 2 !== 0;
+  const mod3 = seed % 3;
+  
+  let label = "";
+  let desc = `Seed ${seed} (${isDozen ? 'Odd' : 'Even'})`;
+  
+  if (isDozen) {
+    if (mod3 === 0) label = "Dozen 1 (1-12)";
+    else if (mod3 === 1) label = "Dozen 2 (13-24)";
+    else label = "Dozen 3 (25-36)";
+  } else {
+    if (mod3 === 0) label = "Col 1 (1,4,7...)";
+    else if (mod3 === 1) label = "Col 2 (2,5,8...)";
+    else label = "Col 3 (3,6,9...)";
+  }
+  
+  return { name: label, description: desc };
+}
+
 // Logic to determine Next Bets
 function calculateGameState(spins: Spin[]): GameState {
   let balanceUnits = 0;
@@ -331,29 +352,18 @@ function calculateGameState(spins: Spin[]): GameState {
       partyUsedInCurrentBlock = false;
       
       // Determine Mix Bet
-      if (i > 0) {
-        const prevRes = spins[i-1].result;
-        const seed = getSeed(prevRes);
-        const isDozen = seed % 2 !== 0; 
-        const mod3 = seed % 3;
-        
-        let label = "";
-        let desc = `Seed ${seed} (${isDozen ? 'Odd' : 'Even'})`;
-        
-        if (isDozen) {
-          if (mod3 === 0) label = "Dozen 1 (1-12)";
-          else if (mod3 === 1) label = "Dozen 2 (13-24)";
-          else label = "Dozen 3 (25-36)";
-        } else {
-          // Column
-          if (mod3 === 0) label = "Col 1 (1,4,7...)";
-          else if (mod3 === 1) label = "Col 2 (2,5,8...)";
-          else label = "Col 3 (3,6,9...)";
-        }
-        activeMixBet = { name: label, type: 'mix', amountUnits: 1, description: desc };
+      let seed: number;
+      if (currentBlockNum === 1) {
+        // Block 1: Use default seed 37 (Odd → Dozen, 37%3=1 → Dozen 2)
+        seed = 37;
       } else {
-        activeMixBet = null;
+        // Other blocks: Use result from previous block's last spin (spin i-1)
+        const prevRes = spins[i-1].result;
+        seed = getSeed(prevRes);
       }
+      
+      const mixInfo = getMixBetFromSeed(seed);
+      activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
     }
 
     // Determine Anchor
@@ -440,26 +450,17 @@ function calculateGameState(spins: Spin[]): GameState {
   // If new block, calculate new mix bet from LAST result
   if (nextBlockIdx === 0) {
     // New block starting
-    if (spins.length > 0) {
-       const prevRes = spins[spins.length - 1].result;
-       const seed = getSeed(prevRes);
-       const isDozen = seed % 2 !== 0;
-       const mod3 = seed % 3;
-       let label = "";
-       let desc = `Seed ${seed} (${isDozen ? 'Odd' : 'Even'})`;
-        if (isDozen) {
-          if (mod3 === 0) label = "Dozen 1 (1-12)";
-          else if (mod3 === 1) label = "Dozen 2 (13-24)";
-          else label = "Dozen 3 (25-36)";
-        } else {
-          if (mod3 === 0) label = "Col 1 (1,4,7...)";
-          else if (mod3 === 1) label = "Col 2 (2,5,8...)";
-          else label = "Col 3 (3,6,9...)";
-        }
-       activeMixBet = { name: label, type: 'mix', amountUnits: 1, description: desc };
+    let seed: number;
+    if (nextBlockNum === 1) {
+      // Should not happen (we already processed block 1), but just in case
+      seed = 37;
     } else {
-       activeMixBet = null;
+      // Use result from previous block's last spin
+      const prevRes = spins[spins.length - 1].result;
+      seed = getSeed(prevRes);
     }
+    const mixInfo = getMixBetFromSeed(seed);
+    activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
     partyUsedInCurrentBlock = false; // Reset for new block
     anchorResultsInBlock = []; // Reset
   }
