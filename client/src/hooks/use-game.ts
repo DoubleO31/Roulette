@@ -1,0 +1,62 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, buildUrl } from "@shared/routes";
+import { type GameState } from "@shared/schema";
+
+// POST /api/sessions
+export function useCreateSession() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(api.sessions.create.path, {
+        method: api.sessions.create.method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error('Failed to create session');
+      return api.sessions.create.responses[201].parse(await res.json());
+    },
+  });
+}
+
+// GET /api/sessions/:id
+export function useSession(id: number) {
+  return useQuery({
+    queryKey: [api.sessions.get.path, id],
+    queryFn: async () => {
+      const url = buildUrl(api.sessions.get.path, { id });
+      const res = await fetch(url, { credentials: "include" });
+      if (res.status === 404) throw new Error('Session not found');
+      if (!res.ok) throw new Error('Failed to fetch session');
+      // The response is dynamic GameState, validating strictly might need a complex schema, 
+      // but we can trust the API types for now or use the generic GameState type.
+      return await res.json() as GameState;
+    },
+    enabled: !!id && !isNaN(id),
+    refetchInterval: 1000, // Polling for real-time feel if needed, though mutation updates cache
+  });
+}
+
+// POST /api/spins
+export function useAddSpin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, result }: { sessionId: number, result: string }) => {
+      const validated = api.spins.create.input.parse({ sessionId, result });
+      const res = await fetch(api.spins.create.path, {
+        method: api.spins.create.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validated),
+        credentials: "include",
+      });
+      
+      if (!res.ok) {
+         const error = await res.json().catch(() => ({}));
+         throw new Error(error.message || 'Failed to add spin');
+      }
+      return await res.json() as GameState;
+    },
+    onSuccess: (data, variables) => {
+      // Update the session query with the new game state immediately
+      queryClient.setQueryData([api.sessions.get.path, variables.sessionId], data);
+    },
+  });
+}

@@ -1,38 +1,33 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import { sessions, spins, type Session, type Spin, type InsertSession, type InsertSpin } from "@shared/schema";
+import { eq, asc } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  createSession(session: InsertSession): Promise<Session>;
+  getSession(id: number): Promise<Session | undefined>;
+  createSpin(spin: InsertSpin): Promise<Spin>;
+  getSpinsBySession(sessionId: number): Promise<Spin[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async createSession(session: InsertSession): Promise<Session> {
+    const [newSession] = await db.insert(sessions).values(session).returning();
+    return newSession;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getSession(id: number): Promise<Session | undefined> {
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, id));
+    return session;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createSpin(spin: InsertSpin): Promise<Spin> {
+    const [newSpin] = await db.insert(spins).values(spin).returning();
+    return newSpin;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async getSpinsBySession(sessionId: number): Promise<Spin[]> {
+    return await db.select().from(spins).where(eq(spins.sessionId, sessionId)).orderBy(asc(spins.id));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
