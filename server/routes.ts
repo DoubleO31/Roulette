@@ -52,6 +52,11 @@ function getSeed(nStr: string): number {
   return parseInt(nStr);
 }
 
+function getPartyIndex(seed: number, count: number, total: number): number {
+  const safeSeed = Number.isFinite(seed) ? seed : 0;
+  return (safeSeed + count) % total;
+}
+
 // Helper to get Mix Bet label and description from seed
 function getMixBetFromSeed(seed: number): { name: string; description: string } {
   const isDozen = seed % 2 !== 0;
@@ -222,7 +227,9 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
     // Party PnL
     if (isParty) {
       // Which party bet?
-      const partyConf = PARTY_CORNERS[partyCount % PARTY_CORNERS.length];
+      const partySeed = i > 0 ? getSeed(spins[i - 1].result) : 37;
+      const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length);
+      const partyConf = PARTY_CORNERS[partyIndex];
       // Check win
       const n = parseInt(res);
       const partyWin = res !== '0' && res !== '00' && partyConf.nums.includes(n);
@@ -307,7 +314,9 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
      }
      
      if (condPL || condSeed) {
-       const partyConf = PARTY_CORNERS[partyCount % PARTY_CORNERS.length];
+       const partySeed = spins.length > 0 ? getSeed(spins[spins.length - 1].result) : 37;
+       const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length);
+       const partyConf = PARTY_CORNERS[partyIndex];
        nextBets.push({
          name: `Party: ${partyConf.label}`,
          type: 'party',
