@@ -6,7 +6,10 @@ import { z } from "zod";
 export const sessions = pgTable("sessions", {
   id: serial("id").primaryKey(),
   startTime: timestamp("start_time").defaultNow(),
-  initialBalance: integer("initial_balance").default(0), // Tracking relative P/L usually starts at 0
+  // Starting bankroll in dollars (set 0 if you only care about P/L)
+  initialBalance: integer("initial_balance").default(0),
+  // Bet unit in dollars (U). Default matches the md rule doc ($5).
+  unitValue: integer("unit_value").default(5),
   isActive: boolean("is_active").default(true),
 });
 
@@ -36,8 +39,12 @@ export interface Bet {
 }
 
 export interface GameState {
-  currentBalance: number; // In dollars
-  currentBalanceUnits: number;
+  unitValue: number;         // Dollars per unit (U)
+  initialBalance: number;    // Dollars
+  pnlUnits: number;          // Net units from bets
+  pnlDollars: number;        // Net dollars from bets
+  currentBalance: number;    // Dollars (initialBalance + pnlDollars)
+  currentBalanceUnits: number; // Same as pnlUnits (kept for backward UI compatibility)
   totalSpins: number;
   currentBlock: number;   // 1-based block index
   isPartyMode: boolean;

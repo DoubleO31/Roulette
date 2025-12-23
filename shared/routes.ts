@@ -12,7 +12,10 @@ export const api = {
     create: {
       method: 'POST' as const,
       path: '/api/sessions',
-      input: z.object({}).optional(),
+      input: z.object({
+        initialBalance: z.number().int().min(0).default(0),
+        unitValue: z.number().int().min(1).default(5),
+      }).optional(),
       responses: {
         201: z.custom<typeof sessions.$inferSelect>(),
       },

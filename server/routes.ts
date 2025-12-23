@@ -5,7 +5,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { type Bet, type GameState, type Spin } from "@shared/schema";
 
-const UNIT = 5; // $5
+const DEFAULT_UNIT = 5; // $5 (can be overridden per session)
 
 // --- HELPER FUNCTIONS FOR ROULETTE LOGIC ---
 
@@ -19,6 +19,10 @@ function getColor(nStr: string): 'red' | 'black' | 'green' {
 function isOdd(nStr: string): boolean {
   if (nStr === '0' || nStr === '00') return false;
   return parseInt(nStr) % 2 !== 0;
+}
+function isEven(nStr: string): boolean {
+  if (nStr === '0' || nStr === '00') return false;
+  return parseInt(nStr) % 2 === 0;
 }
 function isLow(nStr: string): boolean { // 1-18
   if (nStr === '0' || nStr === '00') return false;
@@ -70,21 +74,15 @@ function getMixBetFromSeed(seed: number): { name: string; description: string } 
 }
 
 // Logic to determine Next Bets
-function calculateGameState(spins: Spin[]): GameState {
-  let balanceUnits = 0;
-  let historyLog: any[] = [];
+function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitValue: number }): GameState {
+  let balanceUnits = 0; // P/L in units (U)
   
   // Replay history to calculate balance
   // We need to know what the bets WERE for each spin to calculate P/L
   // This implies we need to simulate the state evolution.
   
-  // Simulation State
-  let currentBlockIndex = 0; // 0-9
-  let blockNumber = 1;       // 1, 2, 3...
-  
-  // Anchor tracking
-  // Cycle: BLACK, ODD, RED, EVEN, 1-18, 19-36
-  const ANCHOR_CYCLE = [
+  // Anchor options (BET 1). We'll pick one per 10-spin block using a seed.
+  const ANCHOR_OPTIONS = [
     { type: 'color', value: 'black', label: 'BLACK', pair: 'red', pairLabel: 'RED' },
     { type: 'parity', value: 'odd', label: 'ODD', pair: 'even', pairLabel: 'EVEN' },
     { type: 'color', value: 'red', label: 'RED', pair: 'black', pairLabel: 'BLACK' },
@@ -103,242 +101,22 @@ function calculateGameState(spins: Spin[]): GameState {
     { label: '32-33-35-36', nums: [32,33,35,36] },
   ];
 
-  // Helper to determine bets for a given state (before result)
-  const getBetsForState = (
-    blockNum: number, 
-    blockIdx: number, 
-    lastResult: string | null, 
-    currentBalUnits: number,
-    prevAnchorResults: boolean[] // [true (win), false (loss), ...] for current block's anchor
-  ) => {
-    const bets: Bet[] = [];
-    
-    // 1. ANCHOR BET
-    const anchorBaseIdx = (blockNum - 1) % ANCHOR_CYCLE.length;
-    let anchor = ANCHOR_CYCLE[anchorBaseIdx];
-    
-    // Check 2-loss flip rule within the block
-    let consecutiveLosses = 0;
-    for (let i = prevAnchorResults.length - 1; i >= 0; i--) {
-      if (!prevAnchorResults[i]) consecutiveLosses++;
-      else break;
-    }
-    
-    // If we have 2+ consecutive losses in this block, flip the anchor
-    const isFlipped = consecutiveLosses >= 2;
-    // Actually, rule says "if anchor loses 2 spins in a row, flip for REST of block"
-    // So we need to check if we EVER hit 2 consecutive losses in this block
-    let hasFlippedInBlock = false;
-    let run = 0;
-    for (const res of prevAnchorResults) {
-      if (!res) run++;
-      else run = 0;
-      if (run >= 2) {
-        hasFlippedInBlock = true;
-        break;
-      }
-    }
-
-    if (hasFlippedInBlock) {
-       bets.push({
-         name: `Anchor: ${anchor.pairLabel}`,
-         type: 'anchor',
-         amountUnits: 1,
-         description: `Flipped from ${anchor.label} due to losses`
-       });
-    } else {
-       bets.push({
-         name: `Anchor: ${anchor.label}`,
-         type: 'anchor',
-         amountUnits: 1,
-         description: 'Standard rotation'
-       });
-    }
-
-    // 2. MIX BET
-    // Based on LAST spin result. If no last result (start of session), maybe skip or random?
-    // Plan says: "At start of 10-spin block, choose BET 2 using last result number as seed"
-    // "Rule: do not change BET 2 mid-block."
-    
-    // We need the result that happened right before this block started.
-    // If blockNum=1, use lastResult (which might be null if brand new, assume no bet or user provides manual seed? let's assume no bet 2 on very first spin if no history)
-    
-    // Wait, we need to look back to finding the seed.
-    // Since we are simulating, we can track the 'activeMixBet' for the block.
-    
-    let mixBet: Bet | null = null;
-    
-    // Logic: calculate seed from the result just before the current block started.
-    // If spin index is 0 (first spin of session), check if there's a prior result. 
-    // For this simulation, we'll return the determined mix bet.
-    
-    return { anchorBet: bets[0], mixBet, partyBet: null };
-  };
-
   // --- REPLAY LOOP ---
   let activeMixBet: Bet | null = null;
   let activePartyIndex = 0;
   let anchorResultsInBlock: boolean[] = [];
+  let activeAnchorBase = ANCHOR_OPTIONS[0];
 
-  // Variables to hold state for "NEXT" prediction
-  let lastSpinResult = null;
-  
-  for (let i = 0; i < spins.length; i++) {
-    const spin = spins[i];
-    const spinIdx = i + 1; // 1-based index
-    const currentBlockNum = Math.ceil(spinIdx / 10);
-    const currentBlockIdx = (spinIdx - 1) % 10; // 0-9
-    
-    // If start of new block, reset block tracking
-    if (currentBlockIdx === 0) {
-      anchorResultsInBlock = [];
-      // Determine Mix Bet for this block based on Previous Spin (i-1)
-      if (i > 0) {
-        const prevRes = spins[i-1].result;
-        const seed = getSeed(prevRes);
-        const isDozen = seed % 2 !== 0; // Odd = Dozen
-        const mod3 = seed % 3;
-        
-        let label = "";
-        let desc = `Seed ${seed} (${isDozen ? 'Odd' : 'Even'})`;
-        
-        if (isDozen) {
-          if (mod3 === 0) label = "Dozen 1 (1-12)"; // Plan says S mod 3 = 0 -> 1-12. Usually mod 3=0 is 3,6,9... wait. 
-          // Plan: "S mod 3 = 0 -> 1-12"
-          else if (mod3 === 1) label = "Dozen 2 (13-24)";
-          else label = "Dozen 3 (25-36)";
-        } else {
-          // Column
-          if (mod3 === 0) label = "Col 1";
-          else if (mod3 === 1) label = "Col 2";
-          else label = "Col 3";
-        }
-        
-        activeMixBet = {
-          name: label,
-          type: 'mix',
-          amountUnits: 1,
-          description: desc
-        };
-      } else {
-        // First spin of session - Plan doesn't strictly say. 
-        // We can default to NO Mix bet or ask user. Let's assume NO Mix bet for spin 1.
-        activeMixBet = null;
-      }
-    }
+  // (Old draft replay loop removed — it referenced undefined variables and could
+  // cause incorrect balance calc. The real replay starts below.)
 
-    // Determine Anchor Bet for this spin
-    const anchorBaseIdx = (currentBlockNum - 1) % ANCHOR_CYCLE.length;
-    const baseAnchor = ANCHOR_CYCLE[anchorBaseIdx];
-    
-    // Check flip status
-    let hasFlipped = false;
-    let run = 0;
-    for (const r of anchorResultsInBlock) {
-      if (!r) run++;
-      else run = 0;
-      if (run >= 2) { hasFlipped = true; break; }
-    }
-    
-    const currentAnchor = hasFlipped ? 
-      { ...baseAnchor, label: baseAnchor.pairLabel, value: baseAnchor.pair, type: baseAnchor.type } : 
-      baseAnchor;
-
-    // Determine Party Bet
-    // "Party Mode is allowed if Session P/L >= +4U OR most recent result seed S mod 7 = 0"
-    // "Max 1 Party spin per 10-spin block" -> Need to track if we partied in this block
-    // IMPORTANT: The prompt says "Party Mode is 1 spin only when called". 
-    // And "Assistant responds each spin with Bets for next spin".
-    // So for the PAST spins, we need to know if we *did* bet party. 
-    // We can't know for sure without storing it, but we can approximate:
-    // If logic triggered, we bet it.
-    // However, the rule "Max 1 Party spin per 10-spin block" makes it deterministic.
-    // We need to track `partySpinUsedInBlock`.
-    
-    // Wait, "Party Mode is 1 spin only when called by the assistant".
-    // Since we are rebuilding state, we apply the logic:
-    // Did we trigger party this block yet?
-    
-    // We need to store `hasPartiedInBlock` in the replay loop.
-    let partyBet: Bet | null = null;
-    // We only trigger party if we haven't yet this block
-    // BUT we need the decision from BEFORE the spin.
-    // We need `prevResult` and `prevBalance`.
-    
-    // Let's simplified: We assume we ALWAYS take the party bet if conditions met and available.
-    // Condition check uses state at start of spin `i`.
-    
-    // --- SCORING THE SPIN ---
-    const res = spin.result;
-    let spinPnL = 0;
-    
-    // 1. Anchor PnL
-    let anchorWin = false;
-    if (currentAnchor.type === 'color') {
-      anchorWin = getColor(res) === currentAnchor.value;
-    } else if (currentAnchor.type === 'parity') {
-      anchorWin = (currentAnchor.value === 'odd' && isOdd(res)) || (currentAnchor.value === 'even' && !isOdd(res));
-    } else if (currentAnchor.type === 'range') {
-      anchorWin = (currentAnchor.value === 'low' && isLow(res)) || (currentAnchor.value === 'high' && isHigh(res));
-    }
-    
-    spinPnL += anchorWin ? 1 : -1;
-    anchorResultsInBlock.push(anchorWin); // Record for flip logic
-    
-    // 2. Mix PnL
-    if (activeMixBet) {
-      let mixWin = false;
-      const n = parseInt(res);
-      if (res !== '0' && res !== '00') {
-        if (activeMixBet.name.includes("Dozen 1")) mixWin = n <= 12;
-        else if (activeMixBet.name.includes("Dozen 2")) mixWin = n > 12 && n <= 24;
-        else if (activeMixBet.name.includes("Dozen 3")) mixWin = n > 24;
-        else if (activeMixBet.name.includes("Col 1")) mixWin = n % 3 === 1;
-        else if (activeMixBet.name.includes("Col 2")) mixWin = n % 3 === 2;
-        else if (activeMixBet.name.includes("Col 3")) mixWin = n % 3 === 0;
-      }
-      spinPnL += mixWin ? 2 : -1;
-    }
-    
-    // 3. Party PnL
-    // Check if we partied on this spin `i`.
-    // Conditions: P/L >= 4 OR (lastSeed % 7 === 0). AND not partied yet in block.
-    // Note: Party condition is based on PREVIOUS state.
-    // We need a variable `hasPartiedInBlock` that resets on block change.
-    
-    // We track this outside the spin loop? No, inside.
-    // We need to know if *this specific spin* was a party spin.
-    // That depends on `balanceUnits` BEFORE `spinPnL` was added, and `spins[i-1]`.
-    
-    // Check party condition for THIS spin
-    let isPartySpin = false;
-    // Condition 1: P/L >= 4
-    const condPL = balanceUnits >= 4;
-    // Condition 2: Last seed mod 7 == 0
-    let condSeed = false;
-    if (i > 0) {
-      const s = getSeed(spins[i-1].result);
-      if (s % 7 === 0) condSeed = true;
-    }
-    
-    // We need to track if we ALREADY partied in this block (spins startIdx to i-1)
-    // This is tricky in a loop. We can just use a flag `partyUsedInCurrentBlock`.
-    
-    // But wait, if we are at spin `i`, we need to know if we partied at spin `i-1`? 
-    // No, we need to know if we partied at any spin in the current block BEFORE `i`.
-    
-    // Let's add `partyUsedInCurrentBlock` to state.
-    
-    // RESTART LOGIC for loop clarity:
-    // We need to maintain `partyUsedInCurrentBlock` state.
-  }
-  
   // --- REAL REPLAY IMPLEMENTATION ---
   balanceUnits = 0;
   let partyUsedInCurrentBlock = false;
   activeMixBet = null;
   anchorResultsInBlock = [];
   activePartyIndex = 0; // Rotates C1...C6
+  activeAnchorBase = ANCHOR_OPTIONS[0];
   
   for (let i = 0; i < spins.length; i++) {
     const spin = spins[i];
@@ -351,24 +129,24 @@ function calculateGameState(spins: Spin[]): GameState {
       anchorResultsInBlock = [];
       partyUsedInCurrentBlock = false;
       
-      // Determine Mix Bet
+      // Determine block seed (used for BOTH anchor + mix). For block 1, use 37.
       let seed: number;
       if (currentBlockNum === 1) {
-        // Block 1: Use default seed 37 (Odd → Dozen, 37%3=1 → Dozen 2)
         seed = 37;
       } else {
-        // Other blocks: Use result from previous block's last spin (spin i-1)
         const prevRes = spins[i-1].result;
         seed = getSeed(prevRes);
       }
+
+      // Randomized BET 1 (Anchor) per 10-spin block
+      activeAnchorBase = ANCHOR_OPTIONS[seed % ANCHOR_OPTIONS.length];
       
       const mixInfo = getMixBetFromSeed(seed);
       activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
     }
 
-    // Determine Anchor
-    const anchorBaseIdx = (currentBlockNum - 1) % ANCHOR_CYCLE.length;
-    const baseAnchor = ANCHOR_CYCLE[anchorBaseIdx];
+    // Determine Anchor (with in-block 2-loss flip)
+    const baseAnchor = activeAnchorBase;
     let hasFlipped = false;
     let run = 0;
     for (const r of anchorResultsInBlock) {
@@ -376,8 +154,8 @@ function calculateGameState(spins: Spin[]): GameState {
       else run = 0;
       if (run >= 2) { hasFlipped = true; break; }
     }
-    const currentAnchor = hasFlipped ? 
-      { ...baseAnchor, label: baseAnchor.pairLabel, value: baseAnchor.pair, type: baseAnchor.type } : 
+    const currentAnchor = hasFlipped ?
+      { ...baseAnchor, label: baseAnchor.pairLabel, value: baseAnchor.pair, type: baseAnchor.type } :
       baseAnchor;
 
     // Determine Party
@@ -401,7 +179,9 @@ function calculateGameState(spins: Spin[]): GameState {
     // Anchor PnL
     let anchorWin = false;
     if (currentAnchor.type === 'color') anchorWin = getColor(res) === currentAnchor.value;
-    else if (currentAnchor.type === 'parity') anchorWin = (currentAnchor.value === 'odd' && isOdd(res)) || (currentAnchor.value === 'even' && !isOdd(res));
+    else if (currentAnchor.type === 'parity') {
+      anchorWin = (currentAnchor.value === 'odd' && isOdd(res)) || (currentAnchor.value === 'even' && isEven(res));
+    }
     else if (currentAnchor.type === 'range') anchorWin = (currentAnchor.value === 'low' && isLow(res)) || (currentAnchor.value === 'high' && isHigh(res));
     
     balanceUnits += anchorWin ? 1 : -1;
@@ -446,28 +226,24 @@ function calculateGameState(spins: Spin[]): GameState {
   
   const nextBets: Bet[] = [];
   
-  // 1. Next Mix Bet
-  // If new block, calculate new mix bet from LAST result
+  // If next spin starts a new block, recompute seed-based bets (Anchor + Mix)
   if (nextBlockIdx === 0) {
-    // New block starting
     let seed: number;
     if (nextBlockNum === 1) {
-      // Should not happen (we already processed block 1), but just in case
       seed = 37;
     } else {
-      // Use result from previous block's last spin
       const prevRes = spins[spins.length - 1].result;
       seed = getSeed(prevRes);
     }
     const mixInfo = getMixBetFromSeed(seed);
     activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
+    activeAnchorBase = ANCHOR_OPTIONS[seed % ANCHOR_OPTIONS.length];
     partyUsedInCurrentBlock = false; // Reset for new block
     anchorResultsInBlock = []; // Reset
   }
   
-  // 2. Next Anchor Bet
-  const anchorBaseIdx = (nextBlockNum - 1) % ANCHOR_CYCLE.length;
-  const baseAnchor = ANCHOR_CYCLE[anchorBaseIdx];
+  // 2. Next Anchor Bet (uses current block's chosen anchor)
+  const baseAnchor = activeAnchorBase;
   let hasFlipped = false;
   let run = 0;
   for (const r of anchorResultsInBlock) {
@@ -475,8 +251,8 @@ function calculateGameState(spins: Spin[]): GameState {
     else run = 0;
     if (run >= 2) { hasFlipped = true; break; }
   }
-  const nextAnchor = hasFlipped ? 
-      { ...baseAnchor, label: baseAnchor.pairLabel } : 
+  const nextAnchor = hasFlipped ?
+      { ...baseAnchor, label: baseAnchor.pairLabel } :
       baseAnchor;
       
   nextBets.push({
@@ -510,8 +286,15 @@ function calculateGameState(spins: Spin[]): GameState {
      }
   }
 
+  const unitValue = Number.isFinite(opts.unitValue) && opts.unitValue > 0 ? opts.unitValue : DEFAULT_UNIT;
+  const initialBalance = Number.isFinite(opts.initialBalance) ? opts.initialBalance : 0;
+
   return {
-    currentBalance: balanceUnits * UNIT,
+    unitValue,
+    initialBalance,
+    pnlUnits: balanceUnits,
+    pnlDollars: balanceUnits * unitValue,
+    currentBalance: initialBalance + balanceUnits * unitValue,
     currentBalanceUnits: balanceUnits,
     totalSpins: spins.length,
     currentBlock: nextBlockNum,
@@ -526,7 +309,11 @@ function calculateGameState(spins: Spin[]): GameState {
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   
   app.post(api.sessions.create.path, async (req, res) => {
-    const session = await storage.createSession({ initialBalance: 0 });
+    const input = api.sessions.create.input?.parse(req.body ?? {}) ?? { initialBalance: 0, unitValue: DEFAULT_UNIT };
+    const session = await storage.createSession({
+      initialBalance: input.initialBalance,
+      unitValue: input.unitValue,
+    });
     res.status(201).json(session);
   });
 
@@ -536,7 +323,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!session) return res.status(404).json({ message: "Session not found" });
     
     const spins = await storage.getSpinsBySession(id);
-    const state = calculateGameState(spins);
+    const state = calculateGameState(spins, { initialBalance: session.initialBalance ?? 0, unitValue: session.unitValue ?? DEFAULT_UNIT });
     res.json(state);
   });
 
@@ -549,7 +336,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       
       // Recalculate state
       const spins = await storage.getSpinsBySession(sessionId);
-      const state = calculateGameState(spins);
+      const session = await storage.getSession(sessionId);
+      if (!session) return res.status(404).json({ message: "Session not found" });
+      const state = calculateGameState(spins, { initialBalance: session.initialBalance ?? 0, unitValue: session.unitValue ?? DEFAULT_UNIT });
       
       res.status(201).json(state);
     } catch (err) {

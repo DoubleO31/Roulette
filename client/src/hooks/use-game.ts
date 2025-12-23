@@ -5,10 +5,11 @@ import { type GameState } from "@shared/schema";
 // POST /api/sessions
 export function useCreateSession() {
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input?: { initialBalance: number; unitValue: number }) => {
       const res = await fetch(api.sessions.create.path, {
         method: api.sessions.create.method,
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(api.sessions.create.input?.parse(input ?? {}) ?? {}),
         credentials: "include",
       });
       if (!res.ok) throw new Error('Failed to create session');

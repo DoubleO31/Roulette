@@ -1,15 +1,20 @@
 import { useCreateSession } from "@/hooks/use-game";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import { PlayCircle, ShieldCheck, TrendingUp } from "lucide-react";
+import { useState } from "react";
 
 export default function Home() {
   const [, setLocation] = useLocation();
   const { mutate: createSession, isPending } = useCreateSession();
 
+  const [initialBalance, setInitialBalance] = useState(0);
+  const [unitValue, setUnitValue] = useState(5);
+
   const handleStart = () => {
-    createSession(undefined, {
+    createSession({ initialBalance, unitValue }, {
       onSuccess: (session) => {
         setLocation(`/session/${session.id}`);
       },
@@ -51,6 +56,29 @@ export default function Home() {
           transition={{ delay: 0.2, duration: 0.5 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
+          <div className="w-full sm:w-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="text-left">
+              <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Initial balance ($)</label>
+              <Input
+                type="number"
+                min={0}
+                value={initialBalance}
+                onChange={(e) => setInitialBalance(Math.max(0, Number(e.target.value || 0)))}
+                className="h-12"
+              />
+            </div>
+            <div className="text-left">
+              <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Unit size ($ / U)</label>
+              <Input
+                type="number"
+                min={1}
+                value={unitValue}
+                onChange={(e) => setUnitValue(Math.max(1, Number(e.target.value || 1)))}
+                className="h-12"
+              />
+            </div>
+          </div>
+
           <button
             onClick={handleStart}
             disabled={isPending}

@@ -95,6 +95,10 @@ export default function Session() {
                <span className="text-[10px] uppercase text-muted-foreground block font-bold tracking-widest">Session ID</span>
                <span className="font-mono text-sm text-foreground">#{sessionId}</span>
              </div>
+             <div className="text-right hidden sm:block">
+               <span className="text-[10px] uppercase text-muted-foreground block font-bold tracking-widest">Unit</span>
+               <span className="font-mono text-sm text-foreground">${Number(gameState.unitValue ?? 5).toFixed(2)} / U</span>
+             </div>
           </div>
         </div>
       </header>
@@ -107,7 +111,7 @@ export default function Session() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard 
               label="Balance ($)" 
-              value={`$${gameState.currentBalance}`} 
+              value={`$${Number(gameState.currentBalance).toFixed(2)}`} 
               icon={<DollarSign className="w-6 h-6" />}
               variant={gameState.currentBalance >= 0 ? "success" : "danger"}
             />
@@ -116,6 +120,10 @@ export default function Session() {
               value={gameState.currentBalanceUnits} 
               icon={<Layers className="w-6 h-6" />}
               variant={gameState.currentBalanceUnits >= 0 ? "primary" : "default"}
+            />
+            <StatCard 
+              label="Unit ($/U)" 
+              value={gameState.unitValue} 
             />
             <StatCard 
               label="Block" 
