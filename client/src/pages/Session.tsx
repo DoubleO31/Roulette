@@ -86,7 +86,7 @@ export default function Session() {
               <Home className="w-5 h-5" />
             </Link>
             <h1 className="text-xl font-display font-bold text-primary tracking-tight hidden sm:block">
-              ROULETTE PLAN
+              {gameState.sessionName || "ROULETTE PLAN"}
             </h1>
           </div>
           

@@ -79,7 +79,7 @@ function getMixBetFromSeed(seed: number): { name: string; description: string } 
 }
 
 // Logic to determine Next Bets
-function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitValue: number }): GameState {
+function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitValue: number; sessionName?: string | null }): GameState {
   let balanceUnits = 0; // P/L in units (U)
   
   // Replay history to calculate balance
@@ -330,6 +330,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
   const initialBalance = Number.isFinite(opts.initialBalance) ? opts.initialBalance : 0;
 
   return {
+    sessionName: opts.sessionName ?? null,
     unitValue,
     initialBalance,
     pnlUnits: balanceUnits,
@@ -351,10 +352,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(api.sessions.create.path, async (req, res) => {
     const input = api.sessions.create.input?.parse(req.body ?? {}) ?? { initialBalance: 100, unitValue: DEFAULT_UNIT };
     const session = await storage.createSession({
+      name: input.name,
       initialBalance: input.initialBalance,
       unitValue: input.unitValue,
     });
     res.status(201).json(session);
+  });
+
+  app.get(api.sessions.list.path, async (_req, res) => {
+    const sessions = await storage.getSessions();
+    res.json(sessions);
   });
 
   app.get(api.sessions.get.path, async (req, res) => {
@@ -363,8 +370,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!session) return res.status(404).json({ message: "Session not found" });
     
     const spins = await storage.getSpinsBySession(id);
-    const state = calculateGameState(spins, { initialBalance: session.initialBalance ?? 0, unitValue: session.unitValue ?? DEFAULT_UNIT });
+    const state = calculateGameState(spins, {
+      initialBalance: session.initialBalance ?? 0,
+      unitValue: session.unitValue ?? DEFAULT_UNIT,
+      sessionName: session.name ?? null,
+    });
     res.json(state);
+  });
+
+  app.delete(api.sessions.delete.path, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const deleted = await storage.deleteSession(id);
+    if (!deleted) return res.status(404).json({ message: "Session not found" });
+    res.status(204).send();
   });
 
   app.post(api.spins.create.path, async (req, res) => {
@@ -378,7 +396,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const spins = await storage.getSpinsBySession(sessionId);
       const session = await storage.getSession(sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
-      const state = calculateGameState(spins, { initialBalance: session.initialBalance ?? 0, unitValue: session.unitValue ?? DEFAULT_UNIT });
+      const state = calculateGameState(spins, {
+        initialBalance: session.initialBalance ?? 0,
+        unitValue: session.unitValue ?? DEFAULT_UNIT,
+        sessionName: session.name ?? null,
+      });
       
       res.status(201).json(state);
     } catch (err) {

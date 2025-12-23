@@ -1,20 +1,23 @@
-import { useCreateSession } from "@/hooks/use-game";
+import { useCreateSession, useDeleteSession, useSessions } from "@/hooks/use-game";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
-import { PlayCircle, ShieldCheck, TrendingUp } from "lucide-react";
+import { PlayCircle, ShieldCheck, Trash2, ArrowUpRight } from "lucide-react";
 import { useState } from "react";
 
 export default function Home() {
   const [, setLocation] = useLocation();
   const { mutate: createSession, isPending } = useCreateSession();
+  const { data: sessions, isLoading: isLoadingSessions } = useSessions();
+  const { mutate: deleteSession, isPending: isDeleting } = useDeleteSession();
 
+  const [name, setName] = useState("");
   const [initialBalance, setInitialBalance] = useState(100);
   const [unitValue, setUnitValue] = useState(5);
 
   const handleStart = () => {
-    createSession({ initialBalance, unitValue }, {
+    const trimmedName = name.trim();
+    createSession({ name: trimmedName || undefined, initialBalance, unitValue }, {
       onSuccess: (session) => {
         setLocation(`/session/${session.id}`);
       },
@@ -56,7 +59,18 @@ export default function Home() {
           transition={{ delay: 0.2, duration: 0.5 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
-          <div className="w-full sm:w-auto grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="w-full sm:w-auto grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="text-left">
+              <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Session name</label>
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Lucky Run"
+                maxLength={60}
+                className="h-12"
+              />
+            </div>
             <div className="text-left">
               <label className="block text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Initial balance ($)</label>
               <Input
@@ -96,6 +110,75 @@ export default function Home() {
               )}
             </div>
           </button>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35, duration: 0.5 }}
+          className="text-left"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-display font-bold text-white">Active Sessions</h2>
+            {sessions && sessions.length > 0 && (
+              <span className="text-xs text-muted-foreground font-mono">{sessions.length} total</span>
+            )}
+          </div>
+
+          {isLoadingSessions ? (
+            <div className="p-6 rounded-2xl border border-border/50 bg-secondary/20 text-muted-foreground text-sm">
+              Loading sessions...
+            </div>
+          ) : (sessions && sessions.length > 0) ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className="p-4 rounded-2xl border border-border/50 bg-secondary/30 hover:bg-secondary/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-lg font-display font-bold text-foreground">
+                        {session.name || `Session #${session.id}`}
+                      </div>
+                      <div className="text-xs text-muted-foreground font-mono mt-1">
+                        #{session.id} • ${Number(session.unitValue ?? 5).toFixed(2)} / U
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isDeleting) return;
+                        const ok = window.confirm(`Delete ${session.name || `Session #${session.id}`}?`);
+                        if (ok) deleteSession(session.id);
+                      }}
+                      className="p-2 rounded-lg border border-border/50 text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors"
+                      aria-label={`Delete session ${session.id}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-xs text-muted-foreground">
+                      Balance ${Number(session.initialBalance ?? 0).toFixed(2)}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocation(`/session/${session.id}`)}
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:text-primary/80"
+                    >
+                      Resume
+                      <ArrowUpRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-6 rounded-2xl border border-dashed border-border/50 bg-secondary/10 text-muted-foreground text-sm">
+              No sessions yet. Create one to get started.
+            </div>
+          )}
         </motion.div>
 
         <motion.div 

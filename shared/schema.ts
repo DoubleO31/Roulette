@@ -6,6 +6,7 @@ import { z } from "zod";
 export const sessions = pgTable("sessions", {
   id: serial("id").primaryKey(),
   startTime: timestamp("start_time").defaultNow(),
+  name: text("name").default("Session"),
   // Starting bankroll in dollars (set 0 if you only care about P/L)
   initialBalance: integer("initial_balance").default(100),
   // Bet unit in dollars (U). Default matches the md rule doc ($5).
@@ -39,6 +40,7 @@ export interface Bet {
 }
 
 export interface GameState {
+  sessionName?: string | null;
   unitValue: number;         // Dollars per unit (U)
   initialBalance: number;    // Dollars
   pnlUnits: number;          // Net units from bets

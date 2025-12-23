@@ -13,6 +13,7 @@ export const api = {
       method: 'POST' as const,
       path: '/api/sessions',
       input: z.object({
+        name: z.string().trim().min(1).max(60).optional(),
         initialBalance: z.number().int().min(0).default(100),
         unitValue: z.number().int().min(1).default(5),
       }).optional(),
@@ -20,11 +21,26 @@ export const api = {
         201: z.custom<typeof sessions.$inferSelect>(),
       },
     },
+    list: {
+      method: 'GET' as const,
+      path: '/api/sessions',
+      responses: {
+        200: z.custom<typeof sessions.$inferSelect[]>(),
+      },
+    },
     get: {
       method: 'GET' as const,
       path: '/api/sessions/:id',
       responses: {
         200: z.custom<any>(), // Returns GameState
+        404: errorSchemas.notFound,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/sessions/:id',
+      responses: {
+        204: z.null(),
         404: errorSchemas.notFound,
       },
     },

@@ -5,7 +5,7 @@ import { type GameState } from "@shared/schema";
 // POST /api/sessions
 export function useCreateSession() {
   return useMutation({
-    mutationFn: async (input?: { initialBalance: number; unitValue: number }) => {
+    mutationFn: async (input?: { name?: string; initialBalance: number; unitValue: number }) => {
       const res = await fetch(api.sessions.create.path, {
         method: api.sessions.create.method,
         headers: { 'Content-Type': 'application/json' },
@@ -14,6 +14,18 @@ export function useCreateSession() {
       });
       if (!res.ok) throw new Error('Failed to create session');
       return api.sessions.create.responses[201].parse(await res.json());
+    },
+  });
+}
+
+// GET /api/sessions
+export function useSessions() {
+  return useQuery({
+    queryKey: [api.sessions.list.path],
+    queryFn: async () => {
+      const res = await fetch(api.sessions.list.path, { credentials: "include" });
+      if (!res.ok) throw new Error('Failed to fetch sessions');
+      return api.sessions.list.responses[200].parse(await res.json());
     },
   });
 }
@@ -33,6 +45,24 @@ export function useSession(id: number) {
     },
     enabled: !!id && !isNaN(id),
     refetchInterval: 1000, // Polling for real-time feel if needed, though mutation updates cache
+  });
+}
+
+// DELETE /api/sessions/:id
+export function useDeleteSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.sessions.delete.path, { id });
+      const res = await fetch(url, { method: api.sessions.delete.method, credentials: "include" });
+      if (res.status === 404) throw new Error('Session not found');
+      if (!res.ok) throw new Error('Failed to delete session');
+      return null;
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: [api.sessions.list.path] });
+      queryClient.removeQueries({ queryKey: [api.sessions.get.path, id] });
+    },
   });
 }
 
