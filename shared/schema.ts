@@ -7,7 +7,7 @@ export const sessions = pgTable("sessions", {
   id: serial("id").primaryKey(),
   startTime: timestamp("start_time").defaultNow(),
   // Starting bankroll in dollars (set 0 if you only care about P/L)
-  initialBalance: integer("initial_balance").default(0),
+  initialBalance: integer("initial_balance").default(100),
   // Bet unit in dollars (U). Default matches the md rule doc ($5).
   unitValue: integer("unit_value").default(5),
   isActive: boolean("is_active").default(true),

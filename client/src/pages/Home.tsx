@@ -10,7 +10,7 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const { mutate: createSession, isPending } = useCreateSession();
 
-  const [initialBalance, setInitialBalance] = useState(0);
+  const [initialBalance, setInitialBalance] = useState(100);
   const [unitValue, setUnitValue] = useState(5);
 
   const handleStart = () => {

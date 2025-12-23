@@ -103,7 +103,9 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
 
   // --- REPLAY LOOP ---
   let activeMixBet: Bet | null = null;
-  let activePartyIndex = 0;
+  let mixBlockSize = 0;
+  let mixSpinsInBlock = 0;
+  let partyCount = 0;
   let anchorResultsInBlock: boolean[] = [];
   let activeAnchorBase = ANCHOR_OPTIONS[0];
 
@@ -114,8 +116,10 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
   balanceUnits = 0;
   let partyUsedInCurrentBlock = false;
   activeMixBet = null;
+  mixBlockSize = 0;
+  mixSpinsInBlock = 0;
   anchorResultsInBlock = [];
-  activePartyIndex = 0; // Rotates C1...C6
+  partyCount = 0; // Counts how many party bets have been called so far
   activeAnchorBase = ANCHOR_OPTIONS[0];
   
   for (let i = 0; i < spins.length; i++) {
@@ -141,7 +145,18 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
       // Randomized BET 1 (Anchor) per 10-spin block
       activeAnchorBase = ANCHOR_OPTIONS[seed % ANCHOR_OPTIONS.length];
       
-      const mixInfo = getMixBetFromSeed(seed);
+    }
+
+    // Randomized BET 2 (Mix) per variable block (3-6 spins)
+    if (mixSpinsInBlock === 0) {
+      let mixSeed: number;
+      if (i === 0) {
+        mixSeed = 37;
+      } else {
+        mixSeed = getSeed(spins[i - 1].result);
+      }
+      mixBlockSize = 3 + (mixSeed % 4);
+      const mixInfo = getMixBetFromSeed(mixSeed);
       activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
     }
 
@@ -207,14 +222,19 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
     // Party PnL
     if (isParty) {
       // Which party bet?
-      const partyConf = PARTY_CORNERS[activePartyIndex];
+      const partyConf = PARTY_CORNERS[partyCount % PARTY_CORNERS.length];
       // Check win
       const n = parseInt(res);
       const partyWin = res !== '0' && res !== '00' && partyConf.nums.includes(n);
       balanceUnits += partyWin ? 8 : -1; // Corner pays 8:1
       
       // Rotate party index
-      activePartyIndex = (activePartyIndex + 1) % PARTY_CORNERS.length;
+      partyCount += 1;
+    }
+
+    mixSpinsInBlock += 1;
+    if (mixSpinsInBlock >= mixBlockSize) {
+      mixSpinsInBlock = 0;
     }
   }
 
@@ -226,7 +246,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
   
   const nextBets: Bet[] = [];
   
-  // If next spin starts a new block, recompute seed-based bets (Anchor + Mix)
+  // If next spin starts a new block, recompute seed-based bets (Anchor)
   if (nextBlockIdx === 0) {
     let seed: number;
     if (nextBlockNum === 1) {
@@ -235,11 +255,22 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
       const prevRes = spins[spins.length - 1].result;
       seed = getSeed(prevRes);
     }
-    const mixInfo = getMixBetFromSeed(seed);
-    activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
     activeAnchorBase = ANCHOR_OPTIONS[seed % ANCHOR_OPTIONS.length];
     partyUsedInCurrentBlock = false; // Reset for new block
     anchorResultsInBlock = []; // Reset
+  }
+
+  // Mix bet may start a new variable-sized block (3-6 spins)
+  if (mixSpinsInBlock === 0) {
+    let mixSeed: number;
+    if (spins.length === 0) {
+      mixSeed = 37;
+    } else {
+      mixSeed = getSeed(spins[spins.length - 1].result);
+    }
+    mixBlockSize = 3 + (mixSeed % 4);
+    const mixInfo = getMixBetFromSeed(mixSeed);
+    activeMixBet = { name: mixInfo.name, type: 'mix', amountUnits: 1, description: mixInfo.description };
   }
   
   // 2. Next Anchor Bet (uses current block's chosen anchor)
@@ -276,7 +307,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
      }
      
      if (condPL || condSeed) {
-       const partyConf = PARTY_CORNERS[activePartyIndex];
+       const partyConf = PARTY_CORNERS[partyCount % PARTY_CORNERS.length];
        nextBets.push({
          name: `Party: ${partyConf.label}`,
          type: 'party',
@@ -309,7 +340,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   
   app.post(api.sessions.create.path, async (req, res) => {
-    const input = api.sessions.create.input?.parse(req.body ?? {}) ?? { initialBalance: 0, unitValue: DEFAULT_UNIT };
+    const input = api.sessions.create.input?.parse(req.body ?? {}) ?? { initialBalance: 100, unitValue: DEFAULT_UNIT };
     const session = await storage.createSession({
       initialBalance: input.initialBalance,
       unitValue: input.unitValue,

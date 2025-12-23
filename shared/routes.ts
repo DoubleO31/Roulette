@@ -13,7 +13,7 @@ export const api = {
       method: 'POST' as const,
       path: '/api/sessions',
       input: z.object({
-        initialBalance: z.number().int().min(0).default(0),
+        initialBalance: z.number().int().min(0).default(100),
         unitValue: z.number().int().min(1).default(5),
       }).optional(),
       responses: {
