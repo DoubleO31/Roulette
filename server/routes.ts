@@ -52,9 +52,11 @@ function getSeed(nStr: string): number {
   return parseInt(nStr);
 }
 
-function getPartyIndex(seed: number, count: number, total: number): number {
+function getPartyIndex(seed: number, count: number, total: number, sessionSalt: number): number {
   const safeSeed = Number.isFinite(seed) ? seed : 0;
-  return (safeSeed + count) % total;
+  const safeSalt = Number.isFinite(sessionSalt) ? sessionSalt : 0;
+  const base = (safeSeed + safeSalt) % total;
+  return (base + count) % total;
 }
 
 // Helper to get Mix Bet label and description from seed
@@ -79,8 +81,9 @@ function getMixBetFromSeed(seed: number): { name: string; description: string } 
 }
 
 // Logic to determine Next Bets
-function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitValue: number; sessionName?: string | null }): GameState {
+function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitValue: number; sessionName?: string | null; sessionSeed?: number }): GameState {
   let balanceUnits = 0; // P/L in units (U)
+  const partySalt = Number.isFinite(opts.sessionSeed) ? opts.sessionSeed : 0;
   
   // Replay history to calculate balance
   // We need to know what the bets WERE for each spin to calculate P/L
@@ -228,7 +231,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
     if (isParty) {
       // Which party bet?
       const partySeed = i > 0 ? getSeed(spins[i - 1].result) : 37;
-      const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length);
+      const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length, partySalt);
       const partyConf = PARTY_CORNERS[partyIndex];
       // Check win
       const n = parseInt(res);
@@ -315,7 +318,7 @@ function calculateGameState(spins: Spin[], opts: { initialBalance: number; unitV
      
      if (condPL || condSeed) {
        const partySeed = spins.length > 0 ? getSeed(spins[spins.length - 1].result) : 37;
-       const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length);
+       const partyIndex = getPartyIndex(partySeed, partyCount, PARTY_CORNERS.length, partySalt);
        const partyConf = PARTY_CORNERS[partyIndex];
        nextBets.push({
          name: `Party: ${partyConf.label}`,
@@ -374,6 +377,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       initialBalance: session.initialBalance ?? 0,
       unitValue: session.unitValue ?? DEFAULT_UNIT,
       sessionName: session.name ?? null,
+      sessionSeed: session.startTime ? session.startTime.getTime() : session.id,
     });
     res.json(state);
   });
@@ -400,6 +404,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         initialBalance: session.initialBalance ?? 0,
         unitValue: session.unitValue ?? DEFAULT_UNIT,
         sessionName: session.name ?? null,
+        sessionSeed: session.startTime ? session.startTime.getTime() : session.id,
       });
       
       res.status(201).json(state);
